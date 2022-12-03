@@ -1,0 +1,677 @@
+---
+title: '**IPCA**'
+author: "Isaias Rocha Santos"
+date: "09/08/2022"
+output:
+  ioslides_presentation: default
+  slidy_presentation: default
+  beamer_presentation:
+    slide_level: 2
+    fig_width: 8
+    fig_height: 4
+    fig_caption: yes
+    colortheme: dove
+editor_options:
+  chunck_output_type: console
+---
+
+
+
+```{r setup, include=FALSE}
+
+library(esquisse)
+library(tidyquant)
+library(ggplot2)
+library(ggthemes)
+library(dygraphs)
+library(rjson)
+library(dplyr)
+library(stringr)
+library(plotly)
+library(crosstalk)
+library(lubridate)
+library(readr)
+library(zoo)
+library(sidrar)
+library(rio)
+library(rbcb)
+library(readxl)
+library(plyr)
+library(ggcharts)
+library(purrr)
+library(crosstalk)
+library(flexdashboard)
+library(DT)
+setwd("E:/cop/informes 2022/IPCA")
+```
+
+```{r funções, echo=FALSE}
+data = function(dat){
+  data = dat
+  data$data = as.Date(data$data, format = "%d/%m/%Y")
+  data
+}
+
+data2 = function(dat){
+  data = dat
+  data$DataReferencia = as.Date(data$DataReferencia, format = "%d/%m/%Y")
+  data
+}
+
+graf = function(dat, titulo){
+  don <- xts(x = dat$valor, order.by = dat$data)
+  p <- dygraph(don, main = titulo) %>% 
+    dyRangeSelector()
+  p
+}
+
+central_banc_m <- function(var, grupo){
+  json_file <- str_c("https://api.bcb.gov.br/dados/serie/bcdata.sgs.", var, "/dados/ultimos/12?formato=json")
+  json_data <- fromJSON(paste(readLines(json_file), collapse="")) %>%
+    bind_rows() %>% data()
+  teste = json_data
+  teste$grupo = grupo
+  return(teste)
+}
+
+central_banc_quinzena <- function(var, grupo){
+  json_file <- str_c("https://api.bcb.gov.br/dados/serie/bcdata.sgs.", var, "/dados/ultimos/11?formato=json")
+  json_data <- fromJSON(paste(readLines(json_file), collapse="")) %>%
+    bind_rows() %>% data()
+  teste = json_data
+  teste$grupo = grupo
+  return(teste)
+}
+
+sd_dat <- function(dat){
+  sd_canes <- SharedData$new(dat)
+  sd_canes
+}
+
+
+
+```
+
+
+```{r dataframes to r, echo=FALSE, warning=FALSE}
+
+ipca_geral = central_banc_m(433, "Índice geral")
+
+ipca_alimentos_bebidas = central_banc_m(1635, "Alimentação e bebidas")
+
+ipca_hab = central_banc_m(1636, "Habitação")
+
+ipca_residencia = central_banc_m(1637, "Artigos de residência")
+
+ipca_Vestuario = central_banc_m(1638, "Vestuário")
+
+ipca_Transportes = central_banc_m(1639, "Transportes")
+
+ipca_Comunicacao = central_banc_m(1640, "Comunicação")
+
+ipca_saude_cuidados_pessoais = central_banc_m(1641, "Saúde e cuidados pessoais")
+
+ipca_despesas_pessoais = central_banc_m(1642, "Despesas pessoais")
+ 
+ipca_educacao = central_banc_m(1643, "Educação")
+
+indices <- mget(ls(pattern = "ipca_")) %>% bind_rows()
+indices$valor <- as.numeric(indices$valor)
+geral = filter(indices, grupo == "Índice geral")
+
+```
+
+
+```{r datas , echo=FALSE, message=FALSE}
+ultima_data = indices$data %>% max()
+primeira_data = indices$data %>% min()
+ultimo_mes = filter(indices, data == ultima_data) %>% select(2,3)
+
+ultimo_mes$grupo <- factor(as.character(ultimo_mes$grupo), levels = ultimo_mes$grupo[order(ultimo_mes$valor)])
+
+indice_g = filter(ultimo_mes, grupo == "Índice geral") %>% as.data.frame() %>% as_tibble()
+teste = filter(indices, grupo == "Índice geral") %>% as.data.frame() %>% as_tibble()
+
+maior = ultimo_mes$valor %>% max()
+menor = ultimo_mes$valor %>% min()
+
+
+maior_no_mes = filter(ultimo_mes, valor == maior) %>% select(2) %>%
+  as.data.frame()
+
+maior_no_mes$grupo <- as.character(maior_no_mes$grupo)
+
+menor_no_mes = filter(ultimo_mes, valor == menor) %>% select(2) %>%
+  as.data.frame()
+
+```
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+## acumulado em 12 meses 
+
+ipca_indice = 
+  '/t/1737/n1/all/v/2266/p/all/d/v2266%2013' %>%
+  get_sidra(api=.) %>%
+  mutate(date = ymd(paste0(`Mês (Código)`, '01'))) %>%
+  select(date, Valor) %>%
+  mutate(mensal = round((Valor/lag(Valor, 1)-1)*100, 2),
+         anual = round((Valor/lag(Valor, 12)-1)*100, 2)) %>%
+  dplyr::filter(date >= as.Date(primeira_data))
+
+
+acumulado_no_ultimo_mes = ipca_indice %>%  filter(date == max(date)) %>% select(anual)
+acumulado_no_ultimo_mes = acumulado_no_ultimo_mes$anual
+
+
+gf0 =
+  ggplot(ipca_indice) +
+  aes(x = date, y = anual) +
+  geom_line(size = 0.8, colour = "#112446") +
+  geom_point() +
+  labs(
+    x = "Mês",
+    y = "Var. %",
+    title = "Figura 2. IPCA - Variação acumulada em 12 meses", 
+    subtitle = "var. %",
+    caption = "Fonte: Banco Central do Brasil, elaboração própria."
+  ) +
+  geom_label(aes(label = anual), 
+             vjust = -.15) +
+  ylim(min(ipca_indice$anual)-0.15, max(ipca_indice$anual) +0.15 )+
+  theme_bw()
+  
+
+
+
+## expectativas ipca
+
+
+espectativas <-read.csv("https://olinda.bcb.gov.br/olinda/servico/Expectativas/versao/v1/odata/ExpectativaMercadoMensais?$top=1000&$format=text/csv&$select=Indicador,Data,DataReferencia,Media,Mediana,Minimo,Maximo,numeroRespondentes,baseCalculo", header = FALSE, sep=",") %>%
+filter(V1 ==  "IPCA") %>% filter(V9 == "0") %>% setNames(., c("Indicador","Data","DataReferencia","Media","Mediana"
+,"Minimo","Maximo","numeroRespondentes"
+,"baseCalculo")) %>% filter(Data == max(Data))  %>%
+mutate(DataReferencia = dmy(paste0('01', DataReferencia))) %>%
+  filter(DataReferencia > max(ipca_indice$date))
+  
+
+
+
+espectativas$Data <- as.Date(espectativas$Data, format = "%Y-%m-%d")
+
+
+#### ALTERAÇÕES 
+
+espectativas <- filter(espectativas, DataReferencia != ultima_data)
+
+
+## PRÓXIMOS TRêS MESES 
+
+espectativas = espectativas[order(espectativas$DataReferencia, decreasing=FALSE), ][1:3, ]
+
+## Substituir , por . 
+
+espectativas$Mediana = as.numeric(sub(",", ".", espectativas$Mediana, fixed = TRUE))
+
+## JUNTAR OBSERVADO E EXPECTATIVAS
+
+
+ipca_geral$valor <- as.numeric(ipca_geral$valor)
+espec <- select(espectativas, 3,5) %>% setNames(., c("data","valor"))
+
+
+espec$grupo = "Focus - IPCA"
+
+ipca_geral_0 = ipca_geral
+ipca_geral_0$grupo = "IPCA"
+ipca_geral_1 = espec
+
+
+ipca_geral_expec <- mget(ls(pattern = "ipca_geral_")) %>%
+  bind_rows()
+colnames(ipca_geral_expec) = c("data","valor", "Variável")
+
+ipca_geral_expec$valor = round(ipca_geral_expec$valor, digits = 2)
+
+
+gf1 = ggplot(ipca_geral_expec) +
+  aes(x = data, y = valor) +
+  geom_line(size = 0.8, colour = "#112446") +
+  geom_point() +
+  labs(
+    x = "Mês",
+    y = "Var. %",
+    title = "Figura 1. Var. % IPCA mensal, Focus *", 
+    subtitle = "",
+    caption = "Fonte: Banco Central do Brasil, elaboração própria..\n                                   * Expectativas de mercado para o IPCA."
+  ) +
+  geom_label(aes(label = valor), 
+            vjust = -.1) +
+  ylim(min(ipca_geral_expec$valor)-0.15, max(ipca_geral_expec$valor) +0.15 )+
+  theme_bw()
+
+
+gf1 = gf1 + geom_rect(
+  xmin = min(espec$data),
+  xmax = max(espec$data),
+  ymin = -Inf,
+  ymax = Inf,
+  fill = "#112446",
+  # deixar o retangulo mais transparente
+  alpha = 0.015
+) +
+  
+  geom_label(
+    x = (espec$data[2]),
+    y = (max(ipca_geral_expec$valor)) +0.1,
+    # Usamos o caracter especial \n para adicionar uma quebra de linha
+    label = "Mediana Focus \nMais recente")
+
+
+
+```
+
+## IPCA nos últimos 12 meses
+
+```{r var mensal, echo=FALSE}
+max = ipca_geral_expec %>%
+  filter(Variável == "IPCA") %>%
+  filter(valor == max(valor)) %>%
+  select(1,2)
+
+
+max_ipca_m = substr(as.character(max$data), 6,7)
+max_ipca = as.character(max$valor)
+
+n = mean(espec$valor)
+
+if (n < indice_g[1]) {
+  espec_txt = "desaceleração"
+}else{
+  espec_txt = "aceleração"
+}
+
+
+```
+
+ O IPCA do mês `r str_c(substr(ultima_data, 6, 7))` foi de __`r as.character(indice_g[1])` %__ e de acordo com o relatório Focus de `r max(espectativas$Data)` o mercado espera uma __`r espec_txt`__ do IPCA mensal  para os próximos 3 meses. 
+
+```{r echo=FALSE}
+gf1
+```
+
+## Acumulado em 12 meses
+
+Em 12 meses o IPCA acumula uma variação de  __`r acumulado_no_ultimo_mes` %__.
+
+```{r acumulado em 12 m, echo=FALSE}
+gf0
+```
+
+## IPCA no último mês por Grupo
+
+  Dentre os grupos que compõe IPCA o que apresentou maior crescimento foi o de  __`r maior_no_mes$grupo`__ Com o percentual de __`r as.character(maior)` %__ e o que apresentou menor crescimento foi o grupo __`r as.character(menor_no_mes$grupo)`__ Com o percentual de __`r as.character(menor)` %__
+
+```{r echo=FALSE}
+
+titulo = str_c("Figura 3. IPCA ", substr(ultima_data, 1, 7))
+
+
+ultimo_mes = filter(ultimo_mes, grupo != "Índice geral")
+
+antes = ggplot(ultimo_mes) +
+  aes(x = grupo, weight = valor) +
+  geom_bar(fill = "#112446") +
+  coord_flip() +
+  labs(title = titulo,
+       subtitle = "var. % IPCA mensal por grupo",
+    caption = "Fonte: Banco Central do Brasil, elaboração própria.",
+       x = "Grupos",
+       y = "Percentual",
+       fill = "Percentual")+
+  geom_label(aes(label = valor), 
+            vjust = -.1)+
+  theme_bw()
+
+
+n2 = 
+  ggplot(ultimo_mes) +
+  aes(x = grupo, y = valor) +
+  geom_col(fill = "#112446") +
+  coord_flip() +
+  labs(title = titulo,
+       subtitle =  "var. % IPCA mensal por grupo",
+       caption = "Fonte: Banco Central do Brasil, elaboração própria.",
+       x = NULL,
+       y = "Percentual")+
+  geom_label(aes(label = valor),
+             vjust = .5) +
+  theme_bw()
+n2
+
+```
+
+## IPCA no último mês por Subitem
+
+```{r Subitens, echo=FALSE, message=FALSE, warning=FALSE}
+subitens <- read_excel("E:/cop/subitens.xlsx", 
+                       sheet = "organizado") %>%
+  select(1,3,4,5)
+
+
+ipca <- get_sidra(x = 7060,
+                  variable = c(63,66,69,2265),
+                  period = c("last" = 1)) %>% 
+  mutate(date = ymd(paste0(`Mês (Código)`, '01'))) 
+
+ipca <- dplyr::select(ipca, 5,10,11,12,13,14)
+
+
+ipca <- merge(ipca, subitens, by = "Geral, grupo, subgrupo, item e subitem (Código)")
+
+ipca_geral = filter(ipca, Variável == "IPCA - Variação mensal")
+
+peso = filter(ipca, Variável == "IPCA - Peso mensal")  %>% 
+  select(1,2) %>%
+  set_names(c("Geral, grupo, subgrupo, item e subitem (Código)", "IPCA - Peso mensal"))
+
+
+ipca_acumulado_12meses = filter(ipca, Variável == "IPCA - Variação acumulada em 12 meses") %>% 
+  select(1,2) %>% set_names(c("Geral, grupo, subgrupo, item e subitem (Código)", "IPCA - Variação acumulada em 12 meses"))
+
+
+ipca_acumulado_no_ano = filter(ipca, Variável == "IPCA - Variação acumulada no ano") %>% 
+  select(1,2) %>% set_names(c("Geral, grupo, subgrupo, item e subitem (Código)", "IPCA - Variação acumulada no ano"))
+
+
+ipca_geracl = plyr::join_all(list(ipca_geral,peso,
+                            ipca_acumulado_12meses,
+                            ipca_acumulado_no_ano)) %>%
+  select(1,3,4,5,6,7,8,9,10,2,11,12)
+
+ipca_geracl$"contribuição IPCA" <- round((ipca_geracl$Valor*ipca_geracl$`IPCA - Peso mensal`)/100, digits = 3)
+
+
+tabela_subitens = select(ipca_geracl, 5,7,9,10,11,12,13,8)
+sd_tabela_subitens <- SharedData$new(tabela_subitens)
+
+
+top_3_cont = ipca_geracl[order(ipca_geracl$"contribuição IPCA", decreasing=TRUE), ][1:3, ]
+top_3_var_m = ipca_geracl[order(ipca_geracl$Valor, decreasing=TRUE), ][1:3, ]
+top_3_var_a_12_meses = ipca_geracl[order(ipca_geracl$`IPCA - Variação acumulada em 12 meses`, decreasing=TRUE), ][1:3, ]
+top_3_var_a_ano = ipca_geracl[order(ipca_geracl$`IPCA - Variação acumulada no ano`, decreasing=TRUE), ][1:3, ]
+
+
+menores_no_mes = ipca_geracl
+
+menores_no_mes = menores_no_mes[order(menores_no_mes$Valor,
+                                      decreasing=FALSE), ][1:10, ]
+
+```
+
+
+```{r Top 10 IPCA, echo=FALSE}
+
+top = ipca_geracl %>%
+  bar_chart(x = descrição, y = `contribuição IPCA`, top_n = 10, bar_color = "#112446") +
+  geom_label(aes(label = `contribuição IPCA`),
+               vjust = .5)+
+  labs(
+    title = "Figura 4. Top 10 subitens em contribuição para o IPCA",
+    subtitle = "Contribuição em Pontos Percentuais",
+    caption = "Fonte: IBGE; Elaboração própria",
+    x = "subitens", y = "Pontos Percentuais - p.p%"
+  ) +
+  theme_bw()
+
+# valor no mes
+
+top1 = ipca_geracl %>%
+  bar_chart(x = descrição, y = `Valor`, top_n = 10, bar_color = "#112446") +
+  geom_label(aes(label = `Valor`),
+               vjust = .5)+
+  labs(
+    title = "Figura 5. Top 10 subitens em Variação no Mês",
+    subtitle = "Variação Observada",
+    caption = "Fonte: IBGE; Elaboração própria",
+    x = "Subitens", y = "Var.% no Mês"
+  ) +
+  theme_bw()
+
+
+
+top_negativo_mes = menores_no_mes %>%
+  bar_chart(x = descrição, y = `Valor`, top_n = 10, bar_color = "#112446") +
+  geom_label(aes(label = `Valor`),
+               vjust = .5)+
+  labs(
+    title = "Figura 6. 10 subitens em redução no Mês",
+    subtitle = "Variação Observada do IPCA",
+    caption = "Fonte: IBGE; Elaboração própria",
+    x = NULL,
+    y = "Var.% no Mês"
+  ) +
+  theme_bw()
+
+
+# acumulado em 12 meses 
+top2 = ipca_geracl %>%
+  bar_chart(x = descrição, y = `IPCA - Variação acumulada em 12 meses`, top_n = 10, bar_color = "#112446") +
+  geom_label(aes(label = `IPCA - Variação acumulada em 12 meses`),
+               vjust = .5)+
+  labs(
+    title = "Figura 17. Top 10 subitens em Variação acumulada em 12 meses",
+    subtitle = " IPCA em 12 meses",
+    caption = "Fonte: IBGE; Elaboração própria",
+    x = "Subitens", y = "Var.% Acumulada"
+  ) +
+  theme_bw()
+
+
+# acumulado no ano
+
+
+
+top3 = ipca_geracl %>%
+  bar_chart(x = descrição, y = `IPCA - Variação acumulada no ano`, top_n = 10, bar_color = "#112446") +
+  geom_label(aes(label = `IPCA - Variação acumulada no ano`),
+               vjust = .5)+
+  labs(
+    title = "Figura 16. Top 10 subitens em Variação acumulada no ano",
+    subtitle = "IPCA no ano",
+    caption = "Fonte: IBGE; Elaboração própria",
+    x = "Subitens", y = "Var.% Acumulada"
+  ) +
+  theme_bw()
+
+
+```
+
+
+Dos subitens que compõem o IPCA os três que mais contribuiram para o índice foram  
+__`r top_3_cont$descrição[1]`__, __`r top_3_cont$descrição[2]`__ e __`r top_3_cont$descrição[3]`__ que juntos contribuiram com __`r sum(top_3_cont$"contribuição IPCA")`__ pontos percentuais de um total de __`r as.character(round(sum(ipca_geracl$Valor * ipca_geracl$"IPCA - Peso mensal")/100, 2))`__.
+
+```{r Top 10 contribuição, echo=FALSE}
+top
+```
+
+## Maiores Variações no mês 
+
+Dos subitens que compõem o IPCA os três com maior variação no mês foram  
+__`r top_3_var_m$descrição[1]`__, __`r top_3_var_m$descrição[2]`__ e __`r top_3_var_m$descrição[3]`__ com variação de __`r top_3_var_m$Valor[1]` %__, __`r top_3_var_m$Valor[2]` %__ e __`r top_3_var_m$Valor[3]` %__ respectivamente.
+
+```{r Top 10 variação no mês, echo=FALSE}
+top1
+```
+
+## Dez Maiores Reduções no Mês
+
+```{r 10 itens em redu, echo=FALSE, message=FALSE}
+top_negativo_mes
+```
+
+## Dez maiores Variações no grupo de Alimentação e bebidas 
+
+```{r, echo=FALSE, message=FALSE}
+ipca_geracl %>% filter(grupo == "Alimentação e bebidas") %>%
+  bar_chart(x = descrição, y = `Valor`, top_n = 10, bar_color = "#112446") +
+  geom_label(aes(label = `Valor`),
+               vjust = .5)+
+  labs(
+    title = "Figura 7. Top 10 subitens em Variação no Mês",
+    subtitle = "Variação Observada no grupo Alimentação e bebidas",
+    caption = "Fonte: IBGE; Elaboração própria",
+    x = "Subitens", y = "Var.% no Mês"
+  ) +
+  theme_bw()
+```
+
+## Dez maiores Variações no grupo de Habitação
+
+```{r, echo=FALSE, message=FALSE}
+ipca_geracl %>% filter(grupo == "Habitação") %>%
+  bar_chart(x = descrição, y = `Valor`, top_n = 10, bar_color = "#112446") +
+  geom_label(aes(label = `Valor`),
+               vjust = .5)+
+  labs(
+    title = "Figura 8. Top 10 subitens em Variação no Mês",
+    subtitle = "Variação Observada no grupo Habitação",
+    caption = "Fonte: IBGE; Elaboração própria",
+    x = "Subitens", y = "Var.% no Mês"
+  ) +
+  theme_bw()
+```
+
+## Dez maiores Variações no grupo de Transportes
+
+```{r, echo=FALSE, message=FALSE}
+ipca_geracl %>% filter(grupo == "Transportes") %>%
+  bar_chart(x = descrição, y = `Valor`, top_n = 10, bar_color = "#112446") +
+  geom_label(aes(label = `Valor`),
+               vjust = .5)+
+  labs(
+    title = "Figura 9. Top 10 subitens em Variação no Mês",
+    subtitle = "Variação Observada no grupo Transportes",
+    caption = "Fonte: IBGE; Elaboração própria",
+    x = "Subitens", y = "Var.% no Mês"
+  ) +
+  theme_bw()
+```
+
+## Dez maiores Variações no grupo de Despesas pessoais 
+
+```{r, echo=FALSE, message=FALSE}
+ipca_geracl %>% filter(grupo == "Despesas pessoais") %>%
+  bar_chart(x = descrição, y = `Valor`, top_n = 10, bar_color = "#112446") +
+  geom_label(aes(label = `Valor`),
+               vjust = .5)+
+  labs(
+    title = "Figura 10. Top 10 subitens em Variação no Mês",
+    subtitle = "Variação Observada no grupo Despesas pessoais",
+    caption = "Fonte: IBGE; Elaboração própria",
+    x = "Subitens", y = "Var.% no Mês"
+  ) +
+  theme_bw()
+```
+
+## Dez maiores Variações no grupo de Vestuário
+
+```{r, echo=FALSE, message=FALSE}
+ipca_geracl %>% filter(grupo == "Vestuário") %>%
+  bar_chart(x = descrição, y = `Valor`, top_n = 10, bar_color = "#112446") +
+  geom_label(aes(label = `Valor`),
+               vjust = .5)+
+  labs(
+    title = "Figura 11. Top 10 subitens em Variação no Mês",
+    subtitle = "Variação Observada no grupo Vestuário",
+    caption = "Fonte: IBGE; Elaboração própria",
+    x = "Subitens", y = "Var.% no Mês"
+  ) +
+  theme_bw()
+```
+
+## Dez maiores Variações no grupo de Saúde e cuidados pessoais
+
+```{r, echo=FALSE, message=FALSE}
+ipca_geracl %>% filter(grupo == "Saúde e cuidados pessoais") %>%
+  bar_chart(x = descrição, y = `Valor`, top_n = 10, bar_color = "#112446") +
+  geom_label(aes(label = `Valor`),
+               vjust = .5)+
+  labs(
+    title = "Figura 12. Top 10 subitens em Variação no Mês",
+    subtitle = "Variação Observada no grupo Saúde e cuidados pessoais",
+    caption = "Fonte: IBGE; Elaboração própria",
+    x = "Subitens", y = "Var.% no Mês"
+  ) +
+  theme_bw()
+```
+
+## Dez maiores Variações no grupo de Artigos de residência
+
+```{r, echo=FALSE, message=FALSE}
+ipca_geracl %>% filter(grupo == "Artigos de residência") %>%
+  bar_chart(x = descrição, y = `Valor`, top_n = 10, bar_color = "#112446") +
+  geom_label(aes(label = `Valor`),
+               vjust = .5)+
+  labs(
+    title = "Figura 13. Top 10 subitens em Variação no Mês",
+    subtitle = "Variação Observada no grupo Saúde e cuidados pessoais",
+    caption = "Fonte: IBGE; Elaboração própria",
+    x = "Subitens", y = "Var.% no Mês"
+  ) +
+  theme_bw()
+```
+
+## Dez maiores Variações no grupo de Comunicação
+
+```{r, echo=FALSE, message=FALSE}
+ipca_geracl %>% filter(grupo == "Comunicação") %>%
+  bar_chart(x = descrição, y = `Valor`, top_n = 10, bar_color = "#112446") +
+  geom_label(aes(label = `Valor`),
+               vjust = .5)+
+  labs(
+    title = "Figura 14. Top 10 subitens em Variação no Mês",
+    subtitle = "Variação Observada no grupo Comunicação",
+    caption = "Fonte: IBGE; Elaboração própria",
+    x = "Subitens", y = "Var.% no Mês"
+  ) +
+  theme_bw()
+```
+
+## Dez maiores Variações no grupo de Educação
+
+
+```{r, echo=FALSE, message=FALSE}
+ipca_geracl %>% filter(grupo == "Educação") %>%
+  bar_chart(x = descrição, y = `Valor`, top_n = 10, bar_color = "#112446") +
+  geom_label(aes(label = `Valor`),
+               vjust = .5)+
+  labs(
+    title = "Figura 15. Top 10 subitens em Variação no Mês",
+    subtitle = "Variação Observada no grupo Educação",
+    caption = "Fonte: IBGE; Elaboração própria",
+    x = "Subitens", y = "Var.% no Mês"
+  ) +
+  theme_bw()
+```
+
+
+## Maiores Variações no ano
+
+Dos subitens que compõem o IPCA os três com maior variação acumulada no ano corrente foram  __`r top_3_var_a_ano$descrição[1]`__, __`r top_3_var_a_ano$descrição[2]`__ e __`r top_3_var_a_ano$descrição[3]`__ com variação de __`r top_3_var_a_ano$"IPCA - Variação acumulada no ano" [1]` %__, __`r top_3_var_a_ano$"IPCA - Variação acumulada no ano"[2]` %__ e __`r top_3_var_a_ano$"IPCA - Variação acumulada no ano"[3]` %__ respectivamente.
+
+```{r Top 10 var no ano, echo=FALSE}
+top3
+```
+
+
+## Maiores Variações em 12 meses 
+
+  Dos subitens que compõem o IPCA os três com maior variação acumulada em 12 meses foram  
+__`r top_3_var_a_12_meses$descrição[1]`__, __`r top_3_var_a_12_meses$descrição[2]`__ e __`r top_3_var_a_12_meses$descrição[3]`__ com variação de __`r top_3_var_a_12_meses$"IPCA - Variação acumulada em 12 meses"[1]` %__, __`r top_3_var_a_12_meses$"IPCA - Variação acumulada em 12 meses"[2]` %__ e __`r top_3_var_a_12_meses$"IPCA - Variação acumulada em 12 meses"[3]` %__ respectivamente.
+
+```{r Top 10 var em 12 meses, echo=FALSE}
+top2
+```
+
+
